@@ -3,7 +3,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "AgentForge"
     API_V1_STR: str = "/api/v1"
-    
+
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agentforge"  
+
 
     model_config = SettingsConfigDict(
         env_file=".env",
