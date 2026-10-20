@@ -6,6 +6,8 @@ from apps.api.routers.repository import router as repository_router
 from contextlib import asynccontextmanager
 from apps.api.core.qdrant import init_qdrant
 
+from apps.api.routers.retrieval import router as retrieval_router
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown lifecycle events."""
@@ -34,6 +36,8 @@ app.add_middleware(
 )
 
 app.include_router(repository_router, prefix=settings.API_V1_STR)
+app.include_router(retrieval_router, prefix=settings.API_V1_STR)
+
 
 @app.get("/")
 async def root():
