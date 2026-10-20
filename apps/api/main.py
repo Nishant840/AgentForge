@@ -3,6 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from apps.api.core.config import settings
 from apps.api.routers.repository import router as repository_router
 
+from contextlib import asynccontextmanager
+from apps.api.core.qdrant import init_qdrant
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown lifecycle events."""
+    # --- STARTUP ---
+    print("[AgentForge] Starting up...")
+    await init_qdrant()  # Ensure vector collections are initialized in Qdrant
+    yield
+    # --- SHUTDOWN ---
+    print("[AgentForge] Shutting down...")  # Perform cleanup operations here on app termination
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -10,6 +22,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan
 )
 
 app.add_middleware(
