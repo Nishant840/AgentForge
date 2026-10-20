@@ -33,13 +33,13 @@ async def publish_event(task_id: str, event_type: str, step: int, content: str, 
 
 # ── Streaming Agent Runner ────────────────────────────────────────
 async def run_agent_with_streaming(
-    db: AsyncSession,
     task_id: uuid.UUID,
     repo_id: uuid.UUID,
     description: str
 ):
     """Execute the autonomous agent loop while publishing real-time execution events to the event queue."""
     import json
+    from apps.api.core.database import AsyncSessionLocal
     from apps.api.core.llm import call_llm
     from apps.api.services.agent_tools import TOOL_SCHEMAS, execute_tool
     from apps.api.crud.repository import get_repository
@@ -49,73 +49,74 @@ async def run_agent_with_streaming(
 
     task_id_str = str(task_id)
 
-    # Mark the task as running in the database and notify listeners
-    await update_task_status(db, task_id, TaskStatus.RUNNING)
-    await publish_event(task_id_str, "start", 0, "Agent started working on your task")
+    async with AsyncSessionLocal() as db:
+        # Mark the task as running in the database and notify listeners
+        await update_task_status(db, task_id, TaskStatus.RUNNING)
+        await publish_event(task_id_str, "start", 0, "Agent started working on your task")
 
-    repo = await get_repository(db, repo_id)
-    if not repo:
-        await publish_event(task_id_str, "error", 0, "Repository not found")
-        await update_task_status(db, task_id, TaskStatus.FAILED, error_message="Repository not found")
-        return
+        repo = await get_repository(db, repo_id)
+        if not repo:
+            await publish_event(task_id_str, "error", 0, "Repository not found")
+            await update_task_status(db, task_id, TaskStatus.FAILED, error_message="Repository not found")
+            return
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"""Repository: {repo.owner}/{repo.name}
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"""Repository: {repo.owner}/{repo.name}
 Local Path: {repo.local_path}
-Repository ID: {task_id_str}
+Repository ID: {str(repo_id)}
 Task: {description}
 
 Start by searching the codebase."""}
-    ]
+        ]
 
-    queue = get_event_queue(task_id_str)
+        queue = get_event_queue(task_id_str)
 
-    for step in range(1, MAX_STEPS + 1):
-        await publish_event(task_id_str, "thinking", step, f"Agent is thinking... (step {step})")
+        for step in range(1, MAX_STEPS + 1):
+            await publish_event(task_id_str, "thinking", step, f"Agent is thinking... (step {step})")
 
-        response_message = await call_llm(messages, tools=TOOL_SCHEMAS)
+            response_message = await call_llm(messages, tools=TOOL_SCHEMAS)
 
-        if response_message.tool_calls:
-            for tool_call in response_message.tool_calls:
-                tool_name = tool_call.function.name
-                tool_args = json.loads(tool_call.function.arguments)
+            if response_message.tool_calls:
+                for tool_call in response_message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
 
-                # Publish tool invocation event
-                await publish_event(
-                    task_id_str, "tool_call", step,
-                    f"Calling tool: {tool_name}",
-                    data={"tool": tool_name, "args": tool_args}
-                )
+                    # Publish tool invocation event
+                    await publish_event(
+                        task_id_str, "tool_call", step,
+                        f"Calling tool: {tool_name}",
+                        data={"tool": tool_name, "args": tool_args}
+                    )
 
-                tool_result = await execute_tool(tool_name, tool_args)
+                    tool_result = await execute_tool(tool_name, tool_args)
 
-                # Publish tool execution result event (truncated for clean transport)
-                await publish_event(
-                    task_id_str, "tool_result", step,
-                    f"Tool {tool_name} returned result",
-                    data={"tool": tool_name, "result": tool_result[:300]}
-                )
+                    # Publish tool execution result event (truncated for clean transport)
+                    await publish_event(
+                        task_id_str, "tool_result", step,
+                        f"Tool {tool_name} returned result",
+                        data={"tool": tool_name, "result": tool_result[:300]}
+                    )
 
-                messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
-                messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result})
+                    messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
+                    messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result})
 
-        else:
-            agent_text = response_message.content or ""
-            messages.append({"role": "assistant", "content": agent_text})
+            else:
+                agent_text = response_message.content or ""
+                messages.append({"role": "assistant", "content": agent_text})
 
-            await publish_event(task_id_str, "response", step, agent_text)
+                await publish_event(task_id_str, "response", step, agent_text)
 
-            if "TASK_COMPLETE" in agent_text:
-                await publish_event(task_id_str, "complete", step, "Task completed successfully!")
-                await update_task_status(db, task_id, TaskStatus.COMPLETED, result=agent_text)
-                if queue:
-                    await queue.put(None)  # Sentinel value signaling the WebSocket consumer to close connection
-                return
+                if "TASK_COMPLETE" in agent_text:
+                    await publish_event(task_id_str, "complete", step, "Task completed successfully!")
+                    await update_task_status(db, task_id, TaskStatus.COMPLETED, result=agent_text)
+                    if queue:
+                        await queue.put(None)  # Sentinel value signaling the WebSocket consumer to close connection
+                    return
 
-    # Handle case where agent exhausts all available steps without completion
-    msg = f"Agent reached maximum steps ({MAX_STEPS})"
-    await publish_event(task_id_str, "error", MAX_STEPS, msg)
-    await update_task_status(db, task_id, TaskStatus.FAILED, error_message=msg)
-    if queue:
-        await queue.put(None)  # Close WebSocket stream
+        # Handle case where agent exhausts all available steps without completion
+        msg = f"Agent reached maximum steps ({MAX_STEPS})"
+        await publish_event(task_id_str, "error", MAX_STEPS, msg)
+        await update_task_status(db, task_id, TaskStatus.FAILED, error_message=msg)
+        if queue:
+            await queue.put(None)  # Close WebSocket stream

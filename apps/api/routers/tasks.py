@@ -25,7 +25,7 @@ async def create_new_task(payload: TaskCreate, db: AsyncSession = Depends(get_db
 
     # Fire-and-forget background task execution using asyncio.ensure_future
     asyncio.ensure_future(
-        run_agent_with_streaming(db, task.id, payload.repository_id, payload.description)
+        run_agent_with_streaming(task.id, payload.repository_id, payload.description)
     )
 
     return task
