@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.core.database import get_db
 from apps.api.schemas.repository import RepositoryCreate, RepositoryResponse
 from apps.api.crud.repository import create_repository, get_repository, get_all_repositories, get_repository_by_url
+from apps.api.models.repository import RepositoryStatus
 from apps.api.services.repository import clone_repository
 
 router = APIRouter(prefix="/repositories", tags=["Repositories"])
@@ -15,6 +16,12 @@ async def submit_repository(payload: RepositoryCreate, db: AsyncSession = Depend
 
     existing = await get_repository_by_url(db, url_str)
     if existing:
+        if existing.status == RepositoryStatus.ERROR:
+            # Re-trigger clone and return existing record
+            asyncio.ensure_future(
+                clone_repository(existing.id, url_str, existing.owner, existing.name, payload.default_branch)
+            )
+            return existing
         raise HTTPException(status_code=400, detail="Repository already exists")  # Reject duplicates
 
     # Extract owner and repository name from the GitHub URL (e.g., ["torvalds", "linux"])
