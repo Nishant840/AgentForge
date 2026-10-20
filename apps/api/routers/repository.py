@@ -25,7 +25,7 @@ async def submit_repository(payload: RepositoryCreate, db: AsyncSession = Depend
 
     # Fire and forget — start cloning in the background so the API responds immediately
     asyncio.ensure_future(
-        clone_repository(db, repo.id, url_str, owner, name, payload.default_branch)
+        clone_repository(repo.id, url_str, owner, name, payload.default_branch)
     )
 
     return repo
