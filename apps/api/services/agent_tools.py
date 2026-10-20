@@ -64,7 +64,29 @@ TOOL_SCHEMAS = [
                 "required": ["directory_path", "repo_local_path"]
             }
         }
+    },
+    {
+    "type": "function",
+    "function": {
+        "name": "run_command",
+        "description": "Run a shell command in an isolated sandbox. Use this to run tests (pytest, npm test), check syntax (python -m py_compile), or install dependencies. The command runs inside a Docker container with no internet access.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to run e.g. 'pytest tests/ -v' or 'python -m py_compile src/main.py'"
+                },
+                "repo_local_path": {
+                    "type": "string",
+                    "description": "Absolute local path of the cloned repository"
+                }
+            },
+            "required": ["command", "repo_local_path"]
+        }
     }
+}
+
 ]
 
 # ── Tool Executors (Handlers that execute the requested tool actions) ──
@@ -110,5 +132,22 @@ async def execute_tool(tool_name: str, tool_args: dict) -> str:
             return "\n".join(sorted(items))  # Return sorted directory contents as a clean newline-separated string
         except FileNotFoundError:
             return f"ERROR: Directory not found: {tool_args['directory_path']}"
+
+    elif tool_name == "run_command":
+        from apps.api.services.sandbox import run_in_sandbox           # Import here to avoid circular imports
+        result = await run_in_sandbox(                                 # Run in Docker sandbox
+            command=tool_args["command"],
+            repo_local_path=tool_args["repo_local_path"]
+        )
+        # Format output nicely for the agent to read
+        status = "✅ SUCCESS" if result["success"] else "❌ FAILED"
+        timed = " (TIMED OUT)" if result["timed_out"] else ""
+        return (
+            f"Command: {tool_args['command']}\n"
+            f"Status: {status}{timed}\n"
+            f"Exit Code: {result['exit_code']}\n"
+            f"Output:\n{result['stdout']}"                            # Agent reads this to know what happened
+        )
+
 
     return f"ERROR: Unknown tool: {tool_name}"
