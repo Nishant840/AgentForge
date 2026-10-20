@@ -26,6 +26,10 @@ async def clone_repository(db: AsyncSession, repo_id: uuid.UUID, github_url: str
         await update_repository_status(
             db, repo_id, RepositoryStatus.READY, local_path=local_path
         )
+        # Trigger indexing immediately after successful clone
+        from apps.api.services.indexer import index_repository
+        await index_repository(db, repo_id, local_path)
+
 
     except Exception as e:
         print(f"[ERROR] Failed to clone {github_url}: {e}")
