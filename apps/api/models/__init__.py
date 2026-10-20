@@ -5,3 +5,8 @@ from apps.api.models.repository import Repository, RepositoryStatus
 
 from apps.api.models.repository import Repository, RepositoryStatus
 from apps.api.models.code_chunk import CodeChunk
+
+from apps.api.models.repository import Repository, RepositoryStatus
+from apps.api.models.code_chunk import CodeChunk
+from apps.api.models.task import Task, TaskStatus
+
